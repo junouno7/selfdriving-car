@@ -1,6 +1,6 @@
 # RC Car Controller with Computer Vision
 
-An RC Car Controller application that combines real-time video streaming with advanced computer vision capabilities. The application provides both manual and autonomous control modes, featuring face detection, YOLO-based object detection, and an autopilot mode.
+An RC Car Controller application that combines real-time video streaming with advanced computer vision capabilities. The application provides both manual and autonomous control modes, and features face detection, YOLO-based object detection, and an autopilot mode.
 
 ## Features
 - Real-time video streaming from RC car camera
