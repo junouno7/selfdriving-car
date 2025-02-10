@@ -11,7 +11,7 @@ An RC Car Controller application that combines real-time video streaming with ad
 - Multiple speed control levels (40%, 60%, 80%, 100%)
 - Dual control interfaces (GUI buttons and keyboard controls)
 - Object detection visualization window
-- Adaptive thresholding for lane detection
+- Canny Edge and Adaptive thresholding for lane detection
 - Real-time control response system
 
 ## Demonstrations
