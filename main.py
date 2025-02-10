@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QP
 import torch
 import time
 import pathlib
+from queue import Queue
+from threading import Lock
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath  # Fix for Windows path issues
 
@@ -132,9 +134,9 @@ class VideoStreamThread(QThread):
 
 # Object detection window for displaying processed frames
 class ObjectDetectionWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, title="Object Detection"):
         super().__init__()
-        self.setWindowTitle("Object Detection")
+        self.setWindowTitle(title)
         self.setGeometry(100, 100, 400, 400)
         self.detection_label = QLabel(self)
         self.detection_label.setGeometry(0, 0, 400, 400)
@@ -146,6 +148,63 @@ class ObjectDetectionWindow(QMainWindow):
         pixmap = QPixmap.fromImage(q_image)
         scaled_pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio)
         self.detection_label.setPixmap(scaled_pixmap)
+
+class YOLODetectionThread(QThread):
+    detection_signal = pyqtSignal(object)  # Signal to emit detection results
+    
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.frame_queue = Queue(maxsize=2)  # Only keep latest 2 frames
+        self.running = True
+        self.detection_cooldown = 2
+        self.last_detection_time = 0
+        self.lock = Lock()
+    
+    def add_frame(self, frame):
+        # Non-blocking frame addition - drop frame if queue is full
+        if not self.frame_queue.full():
+            self.frame_queue.put(frame)
+    
+    def run(self):
+        while self.running:
+            if not self.frame_queue.empty():
+                frame = self.frame_queue.get()
+                current_time = time.time()
+                
+                if current_time - self.last_detection_time >= self.detection_cooldown:
+                    try:
+                        with self.lock:
+                            results = self.model(frame)
+                            detections = results.pandas().xyxy[0]
+                            
+                            if not detections.empty:
+                                detection_results = []
+                                for _, detection in detections.iterrows():
+                                    if detection['confidence'] > 0.3:
+                                        detection_results.append({
+                                            'bbox': detection[['xmin', 'ymin', 'xmax', 'ymax']].astype(int).values,
+                                            'label': detection['name'],
+                                            'confidence': detection['confidence']
+                                        })
+                                
+                                if detection_results:
+                                    self.detection_signal.emit({
+                                        'frame': frame,
+                                        'detections': detection_results,
+                                        'timestamp': current_time
+                                    })
+                                    self.last_detection_time = current_time
+                    
+                    except Exception as e:
+                        print(f"YOLO detection error: {e}")
+            
+            # Small sleep to prevent CPU overuse
+            time.sleep(0.01)
+    
+    def stop(self):
+        self.running = False
+        self.wait()
 
 # Main application window
 class CarControllerApp(QWidget):
@@ -170,11 +229,18 @@ class CarControllerApp(QWidget):
             self.model.agnostic = True
             self.model.half()
             print("YOLO model loaded successfully")
+            
+            # Initialize YOLO detection thread
+            self.yolo_thread = YOLODetectionThread(self.model)
+            self.yolo_thread.detection_signal.connect(self.handle_yolo_detection)
+            self.yolo_thread.start()
         except Exception as e:
             print(f"Error loading YOLO model: {e}")
             self.model = None
+            self.yolo_thread = None
         
-        self.detection_window = ObjectDetectionWindow()
+        self.autopilot_window = None
+        self.yolo_window = None
         self.speed_timer = QTimer()
         self.speed_timer.timeout.connect(self.reset_speed)
         self.last_detection_time = 0
@@ -325,36 +391,9 @@ class CarControllerApp(QWidget):
             cv2.fillPoly(mask, roi_points, 255)
             combined = cv2.bitwise_and(thresh, edges, mask=mask)
             
-            if self.yolo_detection_enabled and self.frame_counter % 5 == 0 and self.model is not None:
-                current_time = time.time()
-                if current_time - self.last_detection_time >= self.detection_cooldown:
-                    try:
-                        results = self.model(processed_frame)
-                        detections = results.pandas().xyxy[0]
-                        
-                        if not detections.empty:
-                            for _, detection in detections.iterrows():
-                                x1, y1, x2, y2 = detection[['xmin', 'ymin', 'xmax', 'ymax']].astype(int).values
-                                label = detection['name']
-                                conf = detection['confidence']
-                                
-                                if conf > 0.3:
-                                    if "stop" in label:
-                                        stop_car()
-                                        self.last_detection_time = current_time
-                                        self.speed_timer.start(3000)
-                                    elif "slow" in label:
-                                        speed40()
-                                        self.last_detection_time = current_time
-                                        self.speed_timer.start(5000)
-                                    
-                                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                                    cv2.putText(processed_frame, f'{label} {conf:.2f}', 
-                                              (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 
-                                              0.5, (0, 255, 0), 2)
-                
-                    except Exception as e:
-                        print(f"YOLO detection error: {e}")
+            # Send frame to YOLO thread if enabled
+            if self.yolo_detection_enabled and self.yolo_thread is not None:
+                self.yolo_thread.add_frame(processed_frame)
             
             M = cv2.moments(combined)
             if M["m00"] != 0:
@@ -372,8 +411,8 @@ class CarControllerApp(QWidget):
                     
                 cv2.circle(processed_frame, (cX, cY + height // 2), 10, (0, 255, 0), -1)
             
-            if self.detection_window:
-                self.detection_window.update_frame(processed_frame)
+            if self.autopilot_window:
+                self.autopilot_window.update_frame(processed_frame)
             
             rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
             h, w, _ = rgb_frame.shape
@@ -411,21 +450,33 @@ class CarControllerApp(QWidget):
             self.status_label.setText('H : Face Detection | P : Autopilot (Enabled) | Y : YOLO Detection')
             self.disable_manual_control()
             self.set_buttons_visible(False)
-            self.detection_window = ObjectDetectionWindow()
-            self.detection_window.show()
+            self.autopilot_window = ObjectDetectionWindow("Autopilot Lane Detection")
+            self.autopilot_window.show()
+            # Position the autopilot window
+            self.autopilot_window.move(100, 100)
         else:
             self.status_label.setText('H : Face Detection | P : Autopilot (Disabled) | Y : YOLO Detection')
             self.enable_manual_control()
             self.set_buttons_visible(True)
             stop_car()
-            if self.detection_window:
-                self.detection_window.close()
-                self.detection_window = None
+            if self.autopilot_window:
+                self.autopilot_window.close()
+                self.autopilot_window = None
 
     def toggle_yolo_detection(self):
         self.yolo_detection_enabled = not self.yolo_detection_enabled
         status = "Enabled" if self.yolo_detection_enabled else "Disabled"
         self.status_label.setText(f'H : Face Detection | P : Autopilot | Y : YOLO Detection ({status})')
+        
+        if self.yolo_detection_enabled:
+            self.yolo_window = ObjectDetectionWindow("YOLO Sign Detection")
+            self.yolo_window.show()
+            # Position the YOLO window to the right of autopilot window
+            self.yolo_window.move(520, 100)
+        else:
+            if self.yolo_window:
+                self.yolo_window.close()
+                self.yolo_window = None
 
     def reset_speed(self):
         if self.autopilot_enabled:
@@ -474,13 +525,48 @@ class CarControllerApp(QWidget):
 
     def closeEvent(self, event):
         stop_car()
-        if self.detection_window:
-            self.detection_window.close()
+        if self.autopilot_window:
+            self.autopilot_window.close()
+        if self.yolo_window:
+            self.yolo_window.close()
         if self.speed_timer.isActive():
             self.speed_timer.stop()
+        if self.yolo_thread is not None:
+            self.yolo_thread.stop()
         self.video_thread.stop()
         self.video_thread.wait()
         event.accept()
+
+    def handle_yolo_detection(self, result):
+        if not self.yolo_detection_enabled:
+            return
+            
+        frame = result['frame']
+        detections = result['detections']
+        current_time = result['timestamp']
+        
+        for detection in detections:
+            x1, y1, x2, y2 = detection['bbox']
+            label = detection['label']
+            conf = detection['confidence']
+            
+            if self.autopilot_enabled:
+                if "stop" in label:
+                    stop_car()
+                    self.last_detection_time = current_time
+                    self.speed_timer.start(3000)
+                elif "slow" in label:
+                    speed40()
+                    self.last_detection_time = current_time
+                    self.speed_timer.start(5000)
+            
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f'{label} {conf:.2f}', 
+                      (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 
+                      0.5, (0, 255, 0), 2)
+        
+        if self.yolo_window:
+            self.yolo_window.update_frame(frame)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

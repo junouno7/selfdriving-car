@@ -14,6 +14,27 @@ An RC Car Controller application that combines real-time video streaming with ad
 - Adaptive thresholding for lane detection
 - Real-time control response system
 
+## Demonstrations
+
+### Autopilot Driving Mode
+Watch the RC car navigate autonomously using lane detection and tracking:
+
+https://github.com/junouno7/selfdriving-car/raw/main/videos/selfdrive.gif
+
+### Face Detection
+Demonstration of the real-time face detection:
+
+https://github.com/junouno7/selfdriving-car/raw/main/videos/facedetect.gif
+
+### Traffic Sign Detection
+See the YOLO-based traffic sign detection in action:
+
+https://github.com/junouno7/selfdriving-car/raw/main/videos/signdetect.gif
+
+Closer look at YOLO sign detection:
+
+https://github.com/junouno7/selfdriving-car/raw/main/videos/yolo.gif
+
 ## Requirements
 
 ### Hardware
