@@ -19,21 +19,21 @@ An RC Car Controller application that combines real-time video streaming with ad
 ### Autopilot Driving Mode
 Watch the RC car navigate autonomously using lane detection and tracking:
 
-https://github.com/junouno7/selfdriving-car/raw/main/videos/selfdrive.gif
+![Autopilot Mode Demo](https://github.com/junouno7/selfdriving-car/raw/main/videos/selfdrive.gif)
 
 ### Face Detection
 Demonstration of the real-time face detection:
 
-https://github.com/junouno7/selfdriving-car/raw/main/videos/facedetect.gif
+![Face Detection Demo](https://github.com/junouno7/selfdriving-car/raw/main/videos/facedetect.gif)
 
 ### Traffic Sign Detection
 See the YOLO-based traffic sign detection in action:
 
-https://github.com/junouno7/selfdriving-car/raw/main/videos/signdetect.gif
+![Traffic Sign Detection Demo](https://github.com/junouno7/selfdriving-car/raw/main/videos/signdetect.gif)
 
 Closer look at YOLO sign detection:
 
-https://github.com/junouno7/selfdriving-car/raw/main/videos/yolo.gif
+![YOLO Detection Demo](https://github.com/junouno7/selfdriving-car/raw/main/videos/yolo.gif)
 
 ## Requirements
 
