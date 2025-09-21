@@ -18,6 +18,7 @@ An RC Car Controller application that combines real-time video streaming with ad
 
 ### Autopilot Driving Mode
 Watch the RC car navigate autonomously using lane detection and tracking:
+(*takes a couple seconds to load demo videos*)
 
 ![Autopilot Mode Demo](https://github.com/junouno7/selfdriving-car/raw/main/videos/selfdrive.gif)
 
